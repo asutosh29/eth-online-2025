@@ -6,9 +6,8 @@ import { ThirdwebProvider } from "thirdweb/react";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "thirdweb SDK + Next starter",
-  description:
-    "Starter template for using thirdweb SDK with Next.js App router",
+  title: "Decentralized Inheritance Switch",
+  description: "Manage Your Digital Legacy",
 };
 
 export default function RootLayout({
@@ -17,9 +16,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" className="dark">
       <body className={inter.className}>
-        <ThirdwebProvider>{children}</ThirdwebProvider>
+        {/* Set your desired chain here, e.g., "sepolia" */}
+        <ThirdwebProvider>
+          {children}
+        </ThirdwebProvider>
       </body>
     </html>
   );
