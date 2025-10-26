@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,47 +15,159 @@ import {
 } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, AlertCircle } from "lucide-react";
+import { 
+  useReadContract, 
+  useSendTransaction, 
+  useActiveAccount 
+} from "thirdweb/react";
+import { prepareContractCall } from "thirdweb";
+import { toUnits } from "thirdweb/utils";
+import { getContracts } from "@/lib/contracts";
+
+// Simple utility function to format units
+const formatUnits = (value: bigint, decimals: number): string => {
+  const divisor = BigInt(Math.pow(10, decimals));
+  const wholePart = value / divisor;
+  const fractionalPart = value % divisor;
+  
+  const fractionalStr = fractionalPart.toString().padStart(decimals, '0');
+  const formattedFractional = fractionalStr.slice(0, 2);
+  
+  return `${wholePart}.${formattedFractional}`;
+};
 
 export default function CreateSwitchPage() {
   const router = useRouter();
   const [beneficiary, setBeneficiary] = useState("");
   const [amount, setAmount] = useState("");
-  const [isApproving, setIsApproving] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
+  const [isApproved, setIsApproved] = useState(false);
 
-  // Mock: In a real app, this would come from your wallet connection
-  const isConnected = true; 
-  const mockBalance = "10,000.00 $PYUSD";
+  // Get connected account and contract instances
+  const account = useActiveAccount();
+  const { inheritanceSwitch, pyusd } = getContracts();
 
-  // Mock function to simulate "Approve" transaction
-  const handleApprove = () => {
+  // Fetch PYUSD balance
+  const { 
+    data: balanceData, 
+    isLoading: isLoadingBalance 
+  } = useReadContract({
+    contract: pyusd,
+    method: "balanceOf",
+    params: [account?.address || "0x0"],
+    queryOptions: {
+      enabled: !!account,
+    },
+  });
+
+  // Fetch current allowance
+  const { 
+    data: allowanceData, 
+    isLoading: isLoadingAllowance,
+    refetch: refetchAllowance 
+  } = useReadContract({
+    contract: pyusd,
+    method: "allowance",
+    params: [account?.address || "0x0", inheritanceSwitch.address],
+    queryOptions: {
+      enabled: !!account,
+    },
+  });
+
+  // Check if user already has an active switch
+  const { 
+    data: mySwitchDetails, 
+    isLoading: isLoadingSwitch 
+  } = useReadContract({
+    contract: inheritanceSwitch,
+    method: "getMySwitchDetails",
+    params: [],
+    queryOptions: {
+      enabled: !!account,
+    },
+  });
+
+  // Transaction hooks
+  const { mutate: sendApproveTx, isPending: isApproving } = useSendTransaction();
+  const { mutate: sendCreateTx, isPending: isCreating } = useSendTransaction();
+
+  // Check if user already has an active switch
+  useEffect(() => {
+    if (mySwitchDetails?.isActive) {
+      router.push(`/status/${account?.address}`);
+    }
+  }, [mySwitchDetails, account, router]);
+
+  // Check if approval is sufficient
+  useEffect(() => {
+    if (amount && allowanceData) {
+      const amountInWei = toUnits(amount, 6);
+      setIsApproved(allowanceData >= amountInWei);
+    }
+  }, [amount, allowanceData]);
+
+  const isConnected = !!account;
+  const displayBalance = balanceData ? formatUnits(balanceData, 6) : "0.00";
+
+  // Handle PYUSD approval
+  const handleApprove = async () => {
     if (!beneficiary || !amount) {
       alert("Please fill in all fields.");
       return;
     }
-    console.log("Mock Approve:", { beneficiary, amount });
-    setIsApproving(true);
-    setTimeout(() => {
-      setIsApproving(false);
-      alert("Mock Approval Successful!");
-    }, 1500); // Simulate network delay
+
+    if (!account) {
+      alert("Please connect your wallet");
+      return;
+    }
+
+    try {
+      const amountInWei = toUnits(amount, 6);
+      
+      const tx = prepareContractCall({
+        contract: pyusd,
+        method: "approve",
+        params: [inheritanceSwitch.address, amountInWei],
+      });
+
+      await sendApproveTx(tx);
+      alert("Approval successful!");
+      // Refresh allowance data
+      refetchAllowance();
+    } catch (error) {
+      console.error("Approval failed:", error);
+      alert("Approval failed. Please try again.");
+    }
   };
 
-  // Mock function to simulate "Create Switch" transaction
-  const handleCreateSwitch = () => {
+  // Handle switch creation
+  const handleCreateSwitch = async () => {
     if (!beneficiary || !amount) {
       alert("Please fill in all fields.");
       return;
     }
-    console.log("Mock Create Switch:", { beneficiary, amount });
-    setIsCreating(true);
-    setTimeout(() => {
-      setIsCreating(false);
-      alert("Mock Switch Created Successfully!");
-      // Redirect to a mock status page
-      router.push(`/status/0x...YOUR-MOCK-ADDRESS`);
-    }, 1500); // Simulate network delay
+
+    if (!account) {
+      alert("Please connect your wallet");
+      return;
+    }
+
+    try {
+      const amountInWei = toUnits(amount, 6);
+      
+      const tx = prepareContractCall({
+        contract: inheritanceSwitch,
+        method: "initializeSwitch",
+        params: [beneficiary, amountInWei],
+      });
+
+      await sendCreateTx(tx);
+      alert("Switch created successfully!");
+      router.push(`/status/${account.address}`);
+    } catch (error) {
+      console.error("Switch creation failed:", error);
+      alert("Switch creation failed. Please try again.");
+    }
   };
 
   return (
@@ -108,45 +220,75 @@ export default function CreateSwitchPage() {
                   />
                   {isConnected && (
                     <p className="text-sm text-muted-foreground pt-1">
-                      Your available $PYUSD balance: {mockBalance}
+                      Your available PYUSD balance: {displayBalance} PYUSD
                     </p>
                   )}
                 </div>
 
                 <Alert>
-                  {/* <InfoCircledIcon className="h-4 w-4" /> */}
+                  <AlertCircle className="h-4 w-4" />
                   <AlertTitle>Fixed Check-in</AlertTitle>
                   <AlertDescription>
-                    Check-in required every 6 months (fixed).
+                    Check-in required every 6 months (180 days). If you don't check in, your beneficiary can claim the assets.
                   </AlertDescription>
                 </Alert>
+
+                {/* Show error if user already has an active switch */}
+                {mySwitchDetails?.isActive && (
+                  <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Switch Already Active</AlertTitle>
+                    <AlertDescription>
+                      You already have an active inheritance switch. Redirecting to status page...
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {/* Show insufficient balance warning */}
+                {isConnected && amount && balanceData && (
+                  (() => {
+                    const amountInWei = toUnits(amount, 6);
+                    const hasInsufficientBalance = balanceData < amountInWei;
+                    return hasInsufficientBalance ? (
+                      <Alert variant="destructive">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertTitle>Insufficient Balance</AlertTitle>
+                        <AlertDescription>
+                          You don't have enough PYUSD tokens. You need {amount} PYUSD but only have {displayBalance} PYUSD.
+                        </AlertDescription>
+                      </Alert>
+                    ) : null;
+                  })()
+                )}
               </div>
             </CardContent>
             <CardFooter className="flex flex-col gap-4">
               <div className="flex w-full space-x-4">
                 {isConnected ? (
                   <>
-                    <Button
-                      onClick={handleApprove}
-                      className="flex-1"
-                      disabled={isApproving || isCreating || !beneficiary || !amount}
-                    >
-                      {isApproving && (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      )}
-                      {isApproving ? "Approving..." : "Approve $PYUSD Transfer"}
-                    </Button>
-
-                    <Button
-                      onClick={handleCreateSwitch}
-                      className="flex-1"
-                      disabled={isApproving || isCreating || !beneficiary || !amount}
-                    >
-                      {isCreating && (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      )}
-                      {isCreating ? "Creating..." : "Create Switch"}
-                    </Button>
+                    {!isApproved ? (
+                      <Button
+                        onClick={handleApprove}
+                        className="flex-1"
+                        disabled={isApproving || isCreating || !beneficiary || !amount || isLoadingBalance || isLoadingAllowance}
+                      >
+                        {isApproving && (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        )}
+                        {isApproving ? "Approving..." : "Approve PYUSD Transfer"}
+                      </Button>
+                    ) : (
+                      <Button
+                        onClick={handleCreateSwitch}
+                        className="flex-1"
+                        disabled={isApproving || isCreating || !beneficiary || !amount || isLoadingBalance || isLoadingAllowance}
+                      >
+                        {isCreating && (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        )}
+                        {isCreating ? "Creating..." : "Create Switch"}
+                      </Button>
+                    )}
                   </>
                 ) : (
                   <p className="text-muted-foreground w-full text-center">
