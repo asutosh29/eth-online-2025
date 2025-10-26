@@ -210,6 +210,11 @@
 						"internalType": "bool",
 						"name": "isActive",
 						"type": "bool"
+					},
+					{
+						"internalType": "uint256",
+						"name": "timeOutPeriod",
+						"type": "uint256"
 					}
 				],
 				"internalType": "struct InheritanceSwitch.Switch",
@@ -269,11 +274,35 @@
 				"internalType": "uint256",
 				"name": "_pyusdAmount",
 				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "_timeOutPeriod",
+				"type": "uint256"
 			}
 		],
 		"name": "initializeSwitch",
 		"outputs": [],
 		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "_ownerAddress",
+				"type": "address"
+			}
+		],
+		"name": "isBeneficiary",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "",
+				"type": "bool"
+			}
+		],
+		"stateMutability": "view",
 		"type": "function"
 	},
 	{
@@ -296,6 +325,55 @@
 		"type": "function"
 	},
 	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"name": "ownerToSwitch",
+		"outputs": [
+			{
+				"internalType": "address",
+				"name": "beneficiary",
+				"type": "address"
+			},
+			{
+				"internalType": "uint256",
+				"name": "pyusdAmount",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "lastCheckIn",
+				"type": "uint256"
+			},
+			{
+				"internalType": "string",
+				"name": "dataCID",
+				"type": "string"
+			},
+			{
+				"internalType": "bool",
+				"name": "isClaimed",
+				"type": "bool"
+			},
+			{
+				"internalType": "bool",
+				"name": "isActive",
+				"type": "bool"
+			},
+			{
+				"internalType": "uint256",
+				"name": "timeOutPeriod",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
 		"inputs": [],
 		"name": "pyusd",
 		"outputs": [
@@ -309,7 +387,13 @@
 		"type": "function"
 	},
 	{
-		"inputs": [],
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "_ownerAddress",
+				"type": "address"
+			}
+		],
 		"name": "timeOutPeriod",
 		"outputs": [
 			{

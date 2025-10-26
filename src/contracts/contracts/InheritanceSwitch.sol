@@ -12,6 +12,7 @@ struct Switch{
     string dataCID;
     bool isClaimed;
     bool isActive;
+    uint256 timeOutPeriod;
 }
 
 modifier activeOwner() {
@@ -25,9 +26,10 @@ constructor(address _pyusdAddress) {
     require(_pyusdAddress != address(0), "PYUSD address cannot be zero");
     pyusd = IERC20(_pyusdAddress);
 }
-uint256 public constant timeOutPeriod = 180 days;
+//uint256 public constant timeOutPeriod = 180 days;
 
-mapping (address => Switch) internal ownerToSwitch;
+
+mapping (address => Switch) public ownerToSwitch;
 
 event switchCreated(address indexed owner, address indexed beneficiary, uint256 amount);
 event switchCancelled(address indexed owner, uint256 amount);
@@ -36,16 +38,18 @@ event beneficiaryUpdated(address indexed owner,address oldBeneficiary, address n
 event dataCIDUpdated(address indexed owner,string dataCID);
 event switchClaimed(address indexed beneficiary, address indexed owner,string dataCID, uint256 amount);
 
-function initializeSwitch(address _beneficiary,uint _pyusdAmount) public {  
+function initializeSwitch(address _beneficiary,uint _pyusdAmount, uint256 _timeOutPeriod) public {  
  // need to call the ERC20 approve function in frontend before calling this function  
     require(ownerToSwitch[msg.sender].isActive == false, "Switch already exists");
     require(_beneficiary != address(0), "Beneficiary cannot be zero address");
     require(_pyusdAmount > 0, "Amount must be greater than zero");
+    require(_timeOutPeriod > 0, "Timeout period must be greater than zero");
     pyusd.transferFrom(msg.sender, address(this), _pyusdAmount);
     ownerToSwitch[msg.sender].isActive = true;
     ownerToSwitch[msg.sender].beneficiary = _beneficiary;
     ownerToSwitch[msg.sender].lastCheckIn = block.timestamp;
     ownerToSwitch[msg.sender].pyusdAmount = _pyusdAmount;
+    ownerToSwitch[msg.sender].timeOutPeriod = _timeOutPeriod;
     emit switchCreated(msg.sender, _beneficiary, _pyusdAmount);   
 }
 
@@ -77,7 +81,7 @@ function getSwitchDataCID(address _ownerAddress) public view returns(string memo
 function isClaimable(address _ownerAddress) public view  returns(bool) {
 // for anyone to check if a will is claimable    
     bool active = ownerToSwitch[_ownerAddress].isActive;
-    bool timeExpired = block.timestamp > ownerToSwitch[_ownerAddress].lastCheckIn + timeOutPeriod;
+    bool timeExpired = block.timestamp > ownerToSwitch[_ownerAddress].lastCheckIn + ownerToSwitch[_ownerAddress].timeOutPeriod;
     return active && timeExpired;       
 }
 
@@ -111,5 +115,15 @@ function updateBeneficiary(address _newBeneficiary) public activeOwner {
     emit checkedIn(msg.sender, block.timestamp);
     emit beneficiaryUpdated(msg.sender, oldBeneficiary, _newBeneficiary);
 }
+
+function isBeneficiary(address _ownerAddress) public view returns(bool) {
+    require(ownerToSwitch[_ownerAddress].isActive == true);
+    return (msg.sender == ownerToSwitch[_ownerAddress].beneficiary);
+}
+
+function timeOutPeriod(address _ownerAddress) public view returns(uint256){
+    require(ownerToSwitch[_ownerAddress].isActive == true);
+    return block.timestamp - (ownerToSwitch[_ownerAddress].lastCheckIn + ownerToSwitch[_ownerAddress].timeOutPeriod); 
+} 
 
 }

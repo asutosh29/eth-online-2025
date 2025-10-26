@@ -65,6 +65,7 @@ interface SwitchData {
   dataCID: string;
   isClaimed: boolean;
   isActive: boolean;
+  timeOutPeriod: bigint;
 }
 
 export default function StatusPage() {
@@ -78,7 +79,11 @@ export default function StatusPage() {
   // Get contract instances
   const { inheritanceSwitch, pyusd } = getContracts();
 
-  // Fetch public switch data
+  // Determine relationship FIRST (before making contract calls)
+  const isOwner = account?.address?.toLowerCase() === ownerAddress?.toLowerCase();
+  
+  // Fetch public switch data with error handling
+  // Only call if connected - let the contract enforce access
   const { 
     data: switchAmount, 
     isLoading: isLoadingAmount,
@@ -87,57 +92,94 @@ export default function StatusPage() {
     contract: inheritanceSwitch,
     method: "getSwitchAmount",
     params: [ownerAddress],
+    queryOptions: {
+      retry: 0,
+      enabled: !!account && isOwner, // Only call if connected as owner or beneficiary would get it
+    },
   });
 
   const { 
     data: dataCID, 
-    isLoading: isLoadingCID 
+    isLoading: isLoadingCID,
+    error: cidError 
   } = useReadContract({
     contract: inheritanceSwitch,
     method: "getSwitchDataCID",
     params: [ownerAddress],
+    queryOptions: {
+      retry: 0,
+      enabled: !!account && isOwner, // Only call if connected as owner or beneficiary would get it
+    },
   });
 
-  // Fetch claimable status (public function)
+  // Fetch claimable status (public function - no require for active)
+  // This is always callable and can help us determine if a switch exists
   const { 
     data: isClaimable, 
-    isLoading: isLoadingClaimable 
+    isLoading: isLoadingClaimable,
+    error: claimableError 
   } = useReadContract({
     contract: inheritanceSwitch,
     method: "isClaimable",
     params: [ownerAddress],
-  });
-
-  // Fetch timeout period
-  const { data: timeoutPeriod } = useReadContract({
-    contract: inheritanceSwitch,
-    method: "timeOutPeriod",
-    params: [],
-  });
-
-  // Try to get full details if the connected account is the owner
-  const { 
-    data: mySwitchData, 
-    isLoading: isLoadingMySwitch 
-  } = useReadContract({
-    contract: inheritanceSwitch,
-    method: "getMySwitchDetails",
-    params: [],
     queryOptions: {
-      enabled: !!account && account.address.toLowerCase() === ownerAddress.toLowerCase(),
+      retry: 0,
     },
   });
 
-  // Use full data if available (when caller is owner), otherwise use public data
-  const switchData = mySwitchData || null;
+  // Check if connected account is the beneficiary - only if we know there's a switch
+  const shouldCheckBeneficiary = !!account && (!!switchAmount || !amountError);
+  const { 
+    data: isConnectedBeneficiary,
+    isLoading: isLoadingBeneficiaryCheck,
+    error: beneficiaryError 
+  } = useReadContract({
+    contract: inheritanceSwitch,
+    method: "isBeneficiary",
+    params: [ownerAddress],
+    queryOptions: {
+      enabled: !!account && shouldCheckBeneficiary, // Only check if we have a switch
+      retry: 0,
+    },
+  });
+
+  // Try to get full details directly from the public mapping
+  const { 
+    data: mySwitchData, 
+    isLoading: isLoadingMySwitch,
+    error: mySwitchError 
+  } = useReadContract({
+    contract: inheritanceSwitch,
+    method: "ownerToSwitch",
+    params: [ownerAddress],
+    queryOptions: {
+      enabled: !!ownerAddress,
+      retry: 0,
+    },
+  });
+  
+  // Determine relationship AFTER getting data
+  const isBeneficiary = isConnectedBeneficiary === true;
+  const isGuest = !isOwner && !isBeneficiary;
+
+  // Use the switch data directly from the mapping
+  const switchData = mySwitchData;
   const isLoadingSwitch = isLoadingMySwitch;
-  const switchError = amountError;
+  // Combine all possible errors
+  const switchError = amountError || cidError || claimableError || beneficiaryError;
+
+  // Note: timeoutPeriod is stored in the Switch struct per switch, not globally
+  // We'll get it from the switchData if available
+  const timeoutPeriod = switchData?.timeOutPeriod || BigInt(0);
 
   // Transaction hooks
   const { mutate: sendTx, isPending: isCheckingIn } = useSendTransaction();
   const { mutate: sendClaimTx, isPending: isClaiming } = useSendTransaction();
 
-  const isLoading = isLoadingAmount || isLoadingCID || isLoadingClaimable || isLoadingSwitch;
+  const isLoading = isLoadingAmount || isLoadingCID || isLoadingClaimable || isLoadingSwitch || isLoadingBeneficiaryCheck;
+  
+  // Determine if there's actually an active switch
+  const hasActiveSwitch = mySwitchData?.isActive === true;
 
   // Handle check-in
   const handleCheckIn = async () => {
@@ -220,39 +262,91 @@ export default function StatusPage() {
             <CardHeader>
               <CardTitle>Switch Status</CardTitle>
               <CardDescription className="truncate pt-2">
-                Showing status for owner:{" "}
-                <span className="font-mono text-xs">{ownerAddress}</span>
+                Owner: <span className="font-mono text-xs">{ownerAddress}</span>
+                {account && (
+                  <div className="mt-2">
+                    {isOwner && (
+                      <Alert className="bg-blue-500/10 border-blue-500">
+                        <CheckCircle className="h-4 w-4" />
+                        <AlertTitle className="text-sm">You are the owner</AlertTitle>
+                      </Alert>
+                    )}
+                    {isBeneficiary && (
+                      <Alert className="bg-green-500/10 border-green-500">
+                        <CheckCircle className="h-4 w-4" />
+                        <AlertTitle className="text-sm">You are the beneficiary</AlertTitle>
+                      </Alert>
+                    )}
+                    {isGuest && (
+                      <Alert>
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertTitle className="text-sm">You are viewing as a guest</AlertTitle>
+                      </Alert>
+                    )}
+                  </div>
+                )}
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {switchError ? (
-                <Alert variant="destructive">
+              {/* Debug information */}
+              {/* {process.env.NODE_ENV === 'development' && (
+                <Alert className="mb-4">
                   <AlertCircle className="h-4 w-4" />
-                  <AlertTitle>Error</AlertTitle>
+                  <AlertTitle>Debug Info</AlertTitle>
                   <AlertDescription>
-                    {switchError.message || "Failed to fetch switch data"}
+                    <div className="text-xs space-y-1">
+                      <div>isOwner: {String(isOwner)}</div>
+                      <div>account: {account?.address || 'none'}</div>
+                      <div>ownerAddress: {ownerAddress}</div>
+                      <div>switchData: {switchData ? 'exists' : 'null'}</div>
+                      <div>mySwitchError: {mySwitchError?.message || 'none'}</div>
+                      <div>isLoadingMySwitch: {String(isLoadingMySwitch)}</div>
+                      <div>hasActiveSwitch: {String(hasActiveSwitch)}</div>
+                      <div>isClaimable: {String(isClaimable)}</div>
+                      <div>claimableError: {claimableError?.message || 'none'}</div>
+                    </div>
                   </AlertDescription>
                 </Alert>
-              ) : (
-                <div className="space-y-2">
+              )} */}
+
+              {/* Show error only if we're certain there's no switch: owner viewing with no data after loading completes */}
+              {!isLoading && isOwner && account && !switchData && !hasActiveSwitch && (
+                <Alert variant="destructive" className="mb-4">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertTitle>No Active Switch Found</AlertTitle>
+                  <AlertDescription>
+                    This address does not have an active inheritance switch. The switch may have been cancelled or never created.
+                    {mySwitchError && (
+                      <div className="mt-2 text-xs">
+                        Error: {mySwitchError.message}
+                      </div>
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
+              <div className="space-y-2">
                   <StatusItem
                     title="Status"
-                    value={isLoading ? "..." : (switchAmount && switchAmount > 0n ? "Active" : "Inactive or No Switch")}
+                    value={isLoading ? "..." : (hasActiveSwitch ? "Active" : "Inactive or No Switch")}
                     isLoading={isLoading}
                   />
                   <StatusItem
                     title="Beneficiary"
-                    value={switchData?.beneficiary || "Only visible to owner"}
+                    value={
+                      isOwner 
+                        ? (switchData?.beneficiary || "Not set") 
+                        : (isBeneficiary ? "You" : "Hidden")
+                    }
                     isLoading={isLoading}
                   />
                   <StatusItem
                     title="Locked Amount"
-                    value={isLoading ? "..." : switchAmount ? `${formatUnits(switchAmount, 6)} PYUSD` : "0 PYUSD"}
+                    value={isLoading ? "..." : (switchAmount ? `${formatUnits(switchAmount, 6)} PYUSD` : "0 PYUSD")}
                     isLoading={isLoading}
                   />
                   <StatusItem
                     title="Data CID"
-                    value={dataCID || "None"}
+                    value={hasActiveSwitch ? (dataCID || "None") : "N/A"}
                     isLoading={isLoading}
                   />
                   <StatusItem
@@ -267,14 +361,14 @@ export default function StatusPage() {
                   />
                   <StatusItem
                     title="Claimable"
-                    value={isLoading ? "..." : (isClaimable ? "Yes" : "No")}
+                    value={isLoading ? "..." : (hasActiveSwitch ? (isClaimable ? "Yes" : "No") : "N/A")}
                     isLoading={isLoading}
                   />
                 </div>
-              )}
+             
 
               {/* Action Buttons */}
-              {account && (switchData?.isActive || (switchAmount && switchAmount > 0n)) && (
+              {account && hasActiveSwitch && (
                 <div className="mt-6 space-y-3">
                   {account.address.toLowerCase() === ownerAddress.toLowerCase() ? (
                     // Owner actions

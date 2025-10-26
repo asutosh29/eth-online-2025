@@ -22,6 +22,10 @@ export default function HomePage() {
     router.push("/create-switch"); 
   };
 
+  const handleKillSwitch = () => {
+    router.push("/kill");
+  };
+
   return (
     <div className="flex flex-col min-h-screen bg-background text-foreground">
       <Header />
@@ -61,6 +65,21 @@ export default function HomePage() {
             />
             <Button variant="secondary" onClick={handleCheckStatus}>
               Check...
+            </Button>
+          </div>
+        </div>
+
+        {/* Cancel Switch Section */}
+        <div className="mt-12 w-full max-w-md">
+          <div className="border-t border-border pt-6">
+            <h3 className="text-lg font-medium mb-3">
+              Cancel Your Inheritance Switch
+            </h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Cancel your active switch and recover your locked PYUSD tokens.
+            </p>
+            <Button variant="destructive" onClick={handleKillSwitch} className="w-full">
+              Cancel My Switch
             </Button>
           </div>
         </div>

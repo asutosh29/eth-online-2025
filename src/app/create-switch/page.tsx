@@ -24,6 +24,7 @@ import {
 import { prepareContractCall } from "thirdweb";
 import { toUnits } from "thirdweb/utils";
 import { getContracts } from "@/lib/contracts";
+import { uploadToLighthouse } from "@/lib/lighthouse";
 
 // Simple utility function to format units
 const formatUnits = (value: bigint, decimals: number): string => {
@@ -41,6 +42,8 @@ export default function CreateSwitchPage() {
   const router = useRouter();
   const [beneficiary, setBeneficiary] = useState("");
   const [amount, setAmount] = useState("");
+  const [timeoutPeriod, setTimeoutPeriod] = useState("");
+  const [willMessage, setWillMessage] = useState("");
   const [isApproved, setIsApproved] = useState(false);
 
   // Get connected account and contract instances
@@ -142,8 +145,8 @@ export default function CreateSwitchPage() {
 
   // Handle switch creation
   const handleCreateSwitch = async () => {
-    if (!beneficiary || !amount) {
-      alert("Please fill in all fields.");
+    if (!beneficiary || !amount || !timeoutPeriod) {
+      alert("Please fill in all required fields.");
       return;
     }
 
@@ -155,13 +158,37 @@ export default function CreateSwitchPage() {
     try {
       const amountInWei = toUnits(amount, 6);
       
+      // Convert timeout period from days to seconds
+      const timeoutInSeconds = BigInt(parseInt(timeoutPeriod)) * BigInt(86400); // days * seconds per day
+      
+      // Upload will message to Lighthouse if provided
+      let dataCID = "";
+      if (willMessage.trim()) {
+        console.log("Uploading will message to Lighthouse...");
+        dataCID = await uploadToLighthouse(willMessage);
+        console.log("Uploaded to IPFS with CID:", dataCID);
+      }
+      
+      // Create the switch with timeout parameter
       const tx = prepareContractCall({
         contract: inheritanceSwitch,
         method: "initializeSwitch",
-        params: [beneficiary, amountInWei],
+        params: [beneficiary, amountInWei, timeoutInSeconds],
       });
 
       await sendCreateTx(tx);
+      
+      // If we have a CID, update the data pointer
+      if (dataCID) {
+        console.log("Updating data pointer with CID:", dataCID);
+        const updateTx = prepareContractCall({
+          contract: inheritanceSwitch,
+          method: "updateDataPointer",
+          params: [dataCID],
+        });
+        await sendCreateTx(updateTx);
+      }
+      
       alert("Switch created successfully!");
       router.push(`/status/${account.address}`);
     } catch (error) {
@@ -225,11 +252,43 @@ export default function CreateSwitchPage() {
                   )}
                 </div>
 
+                <div className="flex flex-col space-y-2">
+                  <Label htmlFor="timeout">Timeout Period (Days)</Label>
+                  <Input
+                    id="timeout"
+                    type="number"
+                    step="1"
+                    min="1"
+                    placeholder="180"
+                    value={timeoutPeriod}
+                    onChange={(e) => setTimeoutPeriod(e.target.value)}
+                    disabled={!isConnected || isApproving || isCreating}
+                  />
+                  <p className="text-sm text-muted-foreground pt-1">
+                    After this many days without check-in, your beneficiary can claim the assets.
+                  </p>
+                </div>
+
+                <div className="flex flex-col space-y-2">
+                  <Label htmlFor="will">Inheritance Message (Optional)</Label>
+                  <textarea
+                    id="will"
+                    placeholder="Write a message or will for your beneficiary..."
+                    value={willMessage}
+                    onChange={(e) => setWillMessage(e.target.value)}
+                    disabled={!isConnected || isApproving || isCreating}
+                    className="min-h-[100px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    This message will be stored securely on IPFS and only accessible to your beneficiary.
+                  </p>
+                </div>
+
                 <Alert>
                   <AlertCircle className="h-4 w-4" />
-                  <AlertTitle>Fixed Check-in</AlertTitle>
+                  <AlertTitle>Check-in Required</AlertTitle>
                   <AlertDescription>
-                    Check-in required every 6 months (180 days). If you don't check in, your beneficiary can claim the assets.
+                    You must check in within the timeout period you specify. If you don't, your beneficiary can claim the assets.
                   </AlertDescription>
                 </Alert>
 
@@ -270,7 +329,7 @@ export default function CreateSwitchPage() {
                       <Button
                         onClick={handleApprove}
                         className="flex-1"
-                        disabled={isApproving || isCreating || !beneficiary || !amount || isLoadingBalance || isLoadingAllowance}
+                        disabled={isApproving || isCreating || !beneficiary || !amount || !timeoutPeriod || isLoadingBalance || isLoadingAllowance}
                       >
                         {isApproving && (
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -281,7 +340,7 @@ export default function CreateSwitchPage() {
                       <Button
                         onClick={handleCreateSwitch}
                         className="flex-1"
-                        disabled={isApproving || isCreating || !beneficiary || !amount || isLoadingBalance || isLoadingAllowance}
+                        disabled={isApproving || isCreating || !beneficiary || !amount || !timeoutPeriod || isLoadingBalance || isLoadingAllowance}
                       >
                         {isCreating && (
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
